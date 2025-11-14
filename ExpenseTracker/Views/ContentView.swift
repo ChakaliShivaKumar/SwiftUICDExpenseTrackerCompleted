@@ -28,6 +28,15 @@ struct ContentView: View {
                     }
             }
             .tag(1)
+            
+            GroupsTabView()
+                .tabItem {
+                    VStack {
+                        Text("Groups")
+                        Image(systemName: "person.3")
+                    }
+            }
+            .tag(2)
         }
     }
 }

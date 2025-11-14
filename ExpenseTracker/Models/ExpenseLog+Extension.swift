@@ -3,13 +3,13 @@
 //  ExpenseTracker
 //
 //  Created by Alfian Losari on 19/04/20.
-//  Copyright © 2020 Alfian Losari. All rights reserved.
+//  Copyright ©️ 2020 Alfian Losari. All rights reserved.
 //
 
 import Foundation
 import CoreData
 
-extension ExpenseLog: Identifiable {
+extension ExpenseLog {
     
     var categoryEnum: Category {
         Category(rawValue: category ?? "") ?? .other
@@ -25,6 +25,27 @@ extension ExpenseLog: Identifiable {
     
     var amountText: String {
         Utils.numberFormatter.string(from: NSNumber(value: amount?.doubleValue ?? 0)) ?? ""
+    }
+    
+    var isGroupExpenseValue: Bool {
+        isGroupExpense
+    }
+    
+    var groupExpense: Group? {
+        group
+    }
+    
+    var paidByUser: User? {
+        paidBy
+    }
+    
+    var participantsArray: [ExpenseParticipant] {
+        guard let participants = participants as? Set<ExpenseParticipant> else { return [] }
+        return Array(participants)
+    }
+    
+    var participantsTotal: Double {
+        participantsArray.reduce(0.0) { $0 + $1.amountValue }
     }
     
     static func fetchAllCategoriesTotalAmountSum(context: NSManagedObjectContext, completion: @escaping ([(sum: Double, category: Category)]) -> ()) {
@@ -64,7 +85,7 @@ extension ExpenseLog: Identifiable {
         
     }
     
-    static func predicate(with categories: [Category], searchText: String) -> NSPredicate? {
+    static func predicate(with categories: [Category], searchText: String, group: Group? = nil, isGroupExpense: Bool? = nil) -> NSPredicate? {
         var predicates = [NSPredicate]()
         
         if !categories.isEmpty {
@@ -76,6 +97,14 @@ extension ExpenseLog: Identifiable {
             predicates.append(NSPredicate(format: "name CONTAINS[cd] %@", searchText.lowercased()))
         }
         
+        if let group = group {
+            predicates.append(NSPredicate(format: "group == %@", group))
+        }
+        
+        if let isGroupExpense = isGroupExpense {
+            predicates.append(NSPredicate(format: "isGroupExpense == %@", NSNumber(value: isGroupExpense)))
+        }
+        
         if predicates.isEmpty {
             return nil
         } else {
@@ -83,5 +112,47 @@ extension ExpenseLog: Identifiable {
         }
     }
     
+    func splitEqually(among users: [User], context: NSManagedObjectContext) {
+        guard !users.isEmpty else { return }
+        
+        let totalAmount = amount?.doubleValue ?? 0
+        let perPerson = totalAmount / Double(users.count)
+        
+        // Remove existing participants
+        if let existingParticipants = participants as? Set<ExpenseParticipant> {
+            for participant in existingParticipants {
+                context.delete(participant)
+            }
+        }
+        
+        // Create new participants
+        var newParticipants: [ExpenseParticipant] = []
+        for user in users {
+            let participant = ExpenseParticipant.create(context: context, user: user, amount: perPerson)
+            participant.expense = self
+            newParticipants.append(participant)
+        }
+        
+        self.participants = NSSet(array: newParticipants)
+    }
+    
+    func splitByAmounts(amounts: [User: Double], context: NSManagedObjectContext) {
+        // Remove existing participants
+        if let existingParticipants = participants as? Set<ExpenseParticipant> {
+            for participant in existingParticipants {
+                context.delete(participant)
+            }
+        }
+        
+        // Create new participants
+        var newParticipants: [ExpenseParticipant] = []
+        for (user, amount) in amounts {
+            let participant = ExpenseParticipant.create(context: context, user: user, amount: amount)
+            participant.expense = self
+            newParticipants.append(participant)
+        }
+        
+        self.participants = NSSet(array: newParticipants)
+    }
+    
 }
-
