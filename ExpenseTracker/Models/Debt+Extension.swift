@@ -8,7 +8,7 @@
 import Foundation
 import CoreData
 
-extension Debt: Identifiable {
+extension Debt {
     
     var amountValue: Double {
         amount?.doubleValue ?? 0

@@ -8,7 +8,7 @@
 import Foundation
 import CoreData
 
-extension User: Identifiable {
+extension User {
     
     var nameText: String {
         name ?? "Unknown User"

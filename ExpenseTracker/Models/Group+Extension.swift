@@ -8,7 +8,7 @@
 import Foundation
 import CoreData
 
-extension Group: Identifiable {
+extension Group {
     
     var nameText: String {
         name ?? "Unnamed Group"
