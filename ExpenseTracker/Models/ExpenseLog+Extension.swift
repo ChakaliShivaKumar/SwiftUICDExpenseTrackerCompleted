@@ -40,12 +40,15 @@ extension ExpenseLog {
     }
     
     var participantsArray: [ExpenseParticipant] {
-        guard let participants = participants as? Set<ExpenseParticipant> else { return [] }
-        return Array(participants)
+        guard let participantsSet = participants as? Set<ExpenseParticipant> else { return [] }
+        return Array(participantsSet)
     }
     
     var participantsTotal: Double {
-        participantsArray.reduce(0.0) { $0 + $1.amountValue }
+        participantsArray.reduce(0.0) { (total, participant) -> Double in
+            let amountValue = participant.amount?.doubleValue ?? 0.0
+            return total + amountValue
+        }
     }
     
     static func fetchAllCategoriesTotalAmountSum(context: NSManagedObjectContext, completion: @escaping ([(sum: Double, category: Category)]) -> ()) {
