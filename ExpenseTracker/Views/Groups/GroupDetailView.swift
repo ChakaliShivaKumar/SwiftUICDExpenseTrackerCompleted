@@ -51,7 +51,7 @@ struct GroupDetailView: View {
                 GroupExpensesListView(group: group)
             }
         }
-        .navigationBarTitle(group.nameText, displayMode: .inline)
+        .navigationBarTitle(group.nameText)
         .navigationBarItems(trailing: HStack {
             Button(action: { isAddExpensePresented = true }) {
                 Image(systemName: "plus")
@@ -108,6 +108,20 @@ struct GroupExpensesListView: View {
 struct GroupExpenseRowView: View {
     let expense: ExpenseLog
     
+    var splitInfo: String {
+        let participantCount = expense.participantsArray.count
+        guard participantCount > 0 else { return "" }
+        
+        let totalAmount = expense.amount?.doubleValue ?? 0
+        let perPerson = totalAmount / Double(participantCount)
+        
+        if participantCount == 1 {
+            return "1 person"
+        } else {
+            return "\(participantCount) people • \(perPerson.formattedCurrencyText) each"
+        }
+    }
+    
     var body: some View {
         HStack(spacing: 16) {
             CategoryImageView(category: expense.categoryEnum)
@@ -125,6 +139,11 @@ struct GroupExpenseRowView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+                if !splitInfo.isEmpty {
+                    Text(splitInfo)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
             
             Spacer()
@@ -132,10 +151,13 @@ struct GroupExpenseRowView: View {
             VStack(alignment: .trailing) {
                 Text(expense.amountText)
                     .font(.headline)
-                if expense.participantsArray.count > 0 {
-                    Text("\(expense.participantsArray.count) people")
+                // Validate split totals match
+                let participantsTotal = expense.participantsTotal
+                let expenseTotal = expense.amount?.doubleValue ?? 0
+                if abs(participantsTotal - expenseTotal) > 0.01 && expense.participantsArray.count > 0 {
+                    Text("⚠️ Split mismatch")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.orange)
                 }
             }
         }
@@ -183,15 +205,44 @@ struct ExpenseDetailView: View {
                 Section(header: Text("Split Among")) {
                     ForEach(expense.participantsArray) { participant in
                         HStack {
-                            Text(participant.user?.nameText ?? "Unknown")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(participant.user?.nameText ?? "Unknown")
+                                if let user = participant.user, user == expense.paidByUser {
+                                    Text("(Paid)")
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                }
+                            }
                             Spacer()
-                            Text(participant.amountValue.formattedCurrencyText)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(participant.amountValue.formattedCurrencyText)
+                                    .fontWeight(.semibold)
+                                let totalAmount = expense.amount?.doubleValue ?? 0
+                                if totalAmount > 0 {
+                                    let percentage = (participant.amountValue / totalAmount) * 100
+                                    Text("\(percentage.rounded(toPlaces: 1))%")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
                         }
                     }
+                    
+                    // Show split summary
+                    let participantsTotal = expense.participantsTotal
+                    let expenseTotal = expense.amount?.doubleValue ?? 0
+                    HStack {
+                        Text("Total Split:")
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text(participantsTotal.formattedCurrencyText)
+                            .foregroundColor(abs(participantsTotal - expenseTotal) < 0.01 ? .green : .red)
+                    }
+                    .padding(.top, 4)
                 }
             }
         }
-        .navigationBarTitle(expense.nameText, displayMode: .inline)
+        .navigationBarTitle(expense.nameText)
         .navigationBarItems(trailing: Button("Edit") {
             isEditPresented = true
         })

@@ -61,6 +61,39 @@ extension Debt {
         settledAt = Date()
     }
     
+    /// Reverses debts created from an expense (used when editing expenses)
+    static func reverseDebts(from expense: ExpenseLog, context: NSManagedObjectContext) {
+        guard let paidBy = expense.paidBy,
+              let participants = expense.participants as? Set<ExpenseParticipant>,
+              let group = expense.group else { return }
+        
+        for participant in participants {
+            guard let user = participant.user,
+                  user != paidBy,
+                  let participantAmount = participant.amount?.doubleValue,
+                  participantAmount > 0 else { continue }
+            
+            // Find and reverse the debt
+            let existingDebt = findDebt(owedBy: user, owedTo: paidBy, in: group, context: context)
+            
+            if let debt = existingDebt {
+                let currentAmount = debt.amount?.doubleValue ?? 0
+                let newAmount = currentAmount - participantAmount
+                
+                if newAmount <= 0.01 {
+                    // Delete debt if reversed amount is zero or negative
+                    context.delete(debt)
+                } else {
+                    // Update debt with reduced amount
+                    debt.amount = NSDecimalNumber(value: newAmount)
+                }
+            }
+        }
+        
+        // Simplify debts after reversal
+        simplifyDebts(in: group, context: context)
+    }
+    
     static func calculateAndCreateDebts(from expense: ExpenseLog, context: NSManagedObjectContext) {
         guard let paidBy = expense.paidBy,
               let participants = expense.participants as? Set<ExpenseParticipant>,
@@ -111,9 +144,10 @@ extension Debt {
         
         // Calculate net balances
         for debt in debts {
+            guard let owedBy = debt.owedBy, let owedTo = debt.owedTo else { continue }
             let amount = debt.amountValue
-            balances[debt.owedBy, default: 0] -= amount
-            balances[debt.owedTo, default: 0] += amount
+            balances[owedBy, default: 0] -= amount
+            balances[owedTo, default: 0] += amount
         }
         
         // Delete all existing debts in the group

@@ -45,9 +45,38 @@ extension ExpenseLog {
     }
     
     var participantsTotal: Double {
-        participantsArray.reduce(0.0) { (total, participant) -> Double in
-            let amountValue = participant.amount?.doubleValue ?? 0.0
-            return total + amountValue
+        participantsArray.reduce(Double(0)) { (result: Double, participant: ExpenseParticipant) -> Double in
+            result + Double(participant.amountValue)
+        }
+    }
+    
+    /// Validates that participant amounts add up to the expense total
+    var isSplitValid: Bool {
+        let totalAmount = amount?.doubleValue ?? 0
+        let participantsTotal = self.participantsTotal
+        return abs(participantsTotal - totalAmount) < 0.01
+    }
+    
+    /// Gets the split difference (participants total - expense total)
+    var splitDifference: Double {
+        let totalAmount = amount?.doubleValue ?? 0
+        return participantsTotal - totalAmount
+    }
+    
+    /// Gets the user's split amount for this expense
+    /// For group expenses: returns the user's participant amount
+    /// For non-group expenses: returns the full expense amount
+    func userSplitAmount(for user: User) -> Double {
+        if isGroupExpense, let group = group {
+            // For group expenses, find the user's participant amount
+            if let participant = participantsArray.first(where: { $0.user == user }) {
+                return participant.amountValue
+            }
+            // If user is not a participant, they don't owe anything
+            return 0
+        } else {
+            // For non-group expenses, return the full amount
+            return amount?.doubleValue ?? 0
         }
     }
     
@@ -88,6 +117,41 @@ extension ExpenseLog {
         
     }
     
+    /// Fetches category totals showing only the user's split portion
+    /// For group expenses: only counts the user's participant amount
+    /// For non-group expenses: counts the full expense amount
+    static func fetchUserSplitCategoriesTotalAmountSum(context: NSManagedObjectContext, user: User, completion: @escaping ([(sum: Double, category: Category)]) -> ()) {
+        let request: NSFetchRequest<ExpenseLog> = ExpenseLog.fetchRequest()
+        request.returnsObjectsAsFaults = false
+        
+        context.perform {
+            do {
+                let expenses = try request.execute()
+                
+                // Group by category and sum user's split amounts
+                var categorySums: [Category: Double] = [:]
+                
+                for expense in expenses {
+                    let userAmount = expense.userSplitAmount(for: user)
+                    if userAmount > 0 {
+                        let category = expense.categoryEnum
+                        categorySums[category, default: 0] += userAmount
+                    }
+                }
+                
+                // Convert to array of tuples
+                let results = categorySums.map { (category, sum) -> (Double, Category) in
+                    return (sum, category)
+                }
+                
+                completion(results)
+            } catch let error as NSError {
+                print("Error fetching user split amounts: \(error.localizedDescription)")
+                completion([])
+            }
+        }
+    }
+    
     static func predicate(with categories: [Category], searchText: String, group: Group? = nil, isGroupExpense: Bool? = nil) -> NSPredicate? {
         var predicates = [NSPredicate]()
         
@@ -119,7 +183,12 @@ extension ExpenseLog {
         guard !users.isEmpty else { return }
         
         let totalAmount = amount?.doubleValue ?? 0
-        let perPerson = totalAmount / Double(users.count)
+        guard totalAmount > 0 else { return }
+        
+        // Calculate base amount per person
+        let baseAmount = totalAmount / Double(users.count)
+        // Round to 2 decimal places
+        let roundedBase = (baseAmount * 100).rounded() / 100
         
         // Remove existing participants
         if let existingParticipants = participants as? Set<ExpenseParticipant> {
@@ -128,10 +197,23 @@ extension ExpenseLog {
             }
         }
         
-        // Create new participants
+        // Create new participants with proper rounding
         var newParticipants: [ExpenseParticipant] = []
-        for user in users {
-            let participant = ExpenseParticipant.create(context: context, user: user, amount: perPerson)
+        var distributedTotal: Double = 0
+        
+        // Distribute to all but the last person
+        for i in 0..<(users.count - 1) {
+            let user = users[i]
+            let participant = ExpenseParticipant.create(context: context, user: user, amount: roundedBase)
+            participant.expense = self
+            newParticipants.append(participant)
+            distributedTotal += roundedBase
+        }
+        
+        // Last person gets the remainder to ensure exact total
+        if let lastUser = users.last {
+            let remainder = totalAmount - distributedTotal
+            let participant = ExpenseParticipant.create(context: context, user: lastUser, amount: remainder)
             participant.expense = self
             newParticipants.append(participant)
         }
@@ -140,6 +222,11 @@ extension ExpenseLog {
     }
     
     func splitByAmounts(amounts: [User: Double], context: NSManagedObjectContext) {
+        guard !amounts.isEmpty else { return }
+        
+        let totalAmount = amount?.doubleValue ?? 0
+        guard totalAmount > 0 else { return }
+        
         // Remove existing participants
         if let existingParticipants = participants as? Set<ExpenseParticipant> {
             for participant in existingParticipants {
@@ -147,9 +234,43 @@ extension ExpenseLog {
             }
         }
         
+        // Calculate total of provided amounts
+        let providedTotal = amounts.values.reduce(0, +)
+        
+        // Normalize amounts if they don't match total (proportionally adjust)
+        var normalizedAmounts: [User: Double] = [:]
+        if providedTotal > 0 && abs(providedTotal - totalAmount) > 0.01 {
+            // Adjust proportionally
+            let ratio = totalAmount / providedTotal
+            for (user, amount) in amounts {
+                normalizedAmounts[user] = (amount * ratio).rounded(toPlaces: 2)
+            }
+            
+            // Ensure exact total by adjusting the last entry
+            let normalizedTotal = normalizedAmounts.values.reduce(0, +)
+            let normalizedKeys = Array(normalizedAmounts.keys)
+            if let lastUser = normalizedKeys.last {
+                let adjustment = totalAmount - normalizedTotal
+                normalizedAmounts[lastUser] = (normalizedAmounts[lastUser] ?? 0) + adjustment
+            }
+        } else {
+            normalizedAmounts = amounts
+            // If amounts don't add up, adjust the last one
+            let currentTotal = amounts.values.reduce(0, +)
+            if abs(currentTotal - totalAmount) > 0.01 {
+                let amountKeys = Array(amounts.keys)
+                if let lastUser = amountKeys.last {
+                    let adjustment = totalAmount - currentTotal
+                    normalizedAmounts[lastUser] = (normalizedAmounts[lastUser] ?? 0) + adjustment
+                }
+            }
+        }
+        
         // Create new participants
         var newParticipants: [ExpenseParticipant] = []
-        for (user, amount) in amounts {
+        for (user, amount) in normalizedAmounts {
+            // Only create participant if amount is positive
+            guard amount > 0 else { continue }
             let participant = ExpenseParticipant.create(context: context, user: user, amount: amount)
             participant.expense = self
             newParticipants.append(participant)

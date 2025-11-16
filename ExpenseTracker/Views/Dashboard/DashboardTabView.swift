@@ -21,7 +21,7 @@ struct DashboardTabView: View {
         VStack(spacing: 0) {
             VStack(spacing: 4) {
                 if totalExpenses != nil {
-                    Text("Total expenses")
+                    Text("Your Split")
                         .font(.headline)
                     if totalExpenses != nil {
                         Text(totalExpenses!.formattedCurrencyText)
@@ -62,8 +62,22 @@ struct DashboardTabView: View {
     }
     
     func fetchTotalSums() {
-        ExpenseLog.fetchAllCategoriesTotalAmountSum(context: self.context) { (results) in
-            guard !results.isEmpty else { return }
+        // Get the current user (default "You" user or first user)
+        let users = User.fetchAll(context: self.context)
+        guard let currentUser = users.first(where: { $0.nameText == "You" }) ?? users.first else {
+            // If no users exist, show empty state
+            self.totalExpenses = 0
+            self.categoriesSum = []
+            return
+        }
+        
+        // Fetch only the user's split amounts
+        ExpenseLog.fetchUserSplitCategoriesTotalAmountSum(context: self.context, user: currentUser) { (results) in
+            guard !results.isEmpty else {
+                self.totalExpenses = 0
+                self.categoriesSum = []
+                return
+            }
             
             let totalSum = results.map { $0.sum }.reduce(0, +)
             self.totalExpenses = totalSum

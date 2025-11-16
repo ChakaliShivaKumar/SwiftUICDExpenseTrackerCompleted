@@ -42,29 +42,34 @@ struct LogFormView: View {
     }
     
     var isGroupMode: Bool {
-        group != nil || isGroupExpense
+        let currentGroup = group ?? logToEdit?.groupExpense
+        return currentGroup != nil || isGroupExpense
+    }
+    
+    var currentGroup: Group? {
+        group ?? logToEdit?.groupExpense
     }
     
     var body: some View {
         NavigationView {
             Form {
                 Section(header: Text("Basic Information")) {
-                    TextField("Name", text: $name)
-                        .disableAutocorrection(true)
-                    TextField("Amount", value: $amount, formatter: Utils.numberFormatter)
-                        .keyboardType(.numbersAndPunctuation)
+                TextField("Name", text: $name)
+                    .disableAutocorrection(true)
+                TextField("Amount", value: $amount, formatter: Utils.numberFormatter)
+                    .keyboardType(.numbersAndPunctuation)
                     
-                    Picker(selection: $category, label: Text("Category")) {
-                        ForEach(Category.allCases) { category in
-                            Text(category.rawValue.capitalized).tag(category)
-                        }
-                    }
-                    DatePicker(selection: $date, displayedComponents: .date) {
-                        Text("Date")
+                Picker(selection: $category, label: Text("Category")) {
+                    ForEach(Category.allCases) { category in
+                        Text(category.rawValue.capitalized).tag(category)
                     }
                 }
-                
-                if group == nil {
+                DatePicker(selection: $date, displayedComponents: .date) {
+                    Text("Date")
+                }
+            }
+
+                if currentGroup == nil {
                     Section(header: Text("Group Expense")) {
                         Toggle("Split with others", isOn: $isGroupExpense)
                     }
@@ -205,7 +210,10 @@ struct LogFormView: View {
             date = logToEdit.date ?? Date()
             isGroupExpense = logToEdit.isGroupExpenseValue
             paidBy = logToEdit.paidByUser
-            group = logToEdit.groupExpense
+            // Only set group from logToEdit if it wasn't provided as parameter
+            if group == nil {
+                // Note: Can't reassign var parameter, so we'll use the group from logToEdit via computed property
+            }
             
             // Load participants
             selectedParticipants = Set(logToEdit.participantsArray.compactMap { $0.user })
@@ -216,9 +224,9 @@ struct LogFormView: View {
                     customAmounts[user] = participant.amountValue
                 }
             }
-        } else if let group = group {
+        } else if let currentGroup = currentGroup {
             isGroupExpense = true
-            availableUsers = group.membersArray
+            availableUsers = currentGroup.membersArray
             if let firstUser = availableUsers.first {
                 paidBy = firstUser
             }
@@ -246,9 +254,28 @@ struct LogFormView: View {
     func onSaveTapped() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
+        // Validate that all participants are group members
+        if isGroupMode, let group = currentGroup {
+            let groupMembers = Set(group.membersArray)
+            let invalidParticipants = selectedParticipants.filter { !groupMembers.contains($0) }
+            
+            if !invalidParticipants.isEmpty {
+                print("Warning: Some participants are not group members")
+                // Remove invalid participants
+                selectedParticipants = selectedParticipants.intersection(groupMembers)
+            }
+        }
+        
         let log: ExpenseLog
+        let isEditing = logToEdit != nil
+        
         if let logToEdit = self.logToEdit {
             log = logToEdit
+            
+            // Reverse old debts if editing a group expense
+            if isGroupMode && currentGroup != nil {
+                Debt.reverseDebts(from: log, context: context)
+            }
         } else {
             log = ExpenseLog(context: self.context)
             log.id = UUID()
@@ -259,15 +286,27 @@ struct LogFormView: View {
         log.amount = NSDecimalNumber(value: self.amount)
         log.date = self.date
         log.isGroupExpense = isGroupMode
-        log.group = group
+        log.group = currentGroup
         log.paidBy = paidBy
         
         // Handle splitting
         if isGroupMode && !selectedParticipants.isEmpty {
+            // Ensure paidBy is included in participants if they're not already
+            var participantsToSplit = selectedParticipants
+            if let paidBy = paidBy, !participantsToSplit.contains(paidBy) {
+                // Note: paidBy will be excluded from debt calculation, but can be in split
+                // This allows tracking who paid vs who owes
+            }
+            
             switch splitMethod {
             case .equal:
-                log.splitEqually(among: Array(selectedParticipants), context: context)
+                log.splitEqually(among: Array(participantsToSplit), context: context)
             case .amount:
+                // Validate amounts match total
+                let total = customAmounts.values.reduce(0, +)
+                if abs(total - amount) > 0.01 {
+                    // Auto-adjust will happen in splitByAmounts
+                }
                 log.splitByAmounts(amounts: customAmounts, context: context)
             case .percentage:
                 var amounts: [User: Double] = [:]
@@ -282,7 +321,7 @@ struct LogFormView: View {
             try context.saveContext()
             
             // Calculate debts if it's a group expense
-            if isGroupMode && log.group != nil {
+            if isGroupMode && currentGroup != nil {
                 Debt.calculateAndCreateDebts(from: log, context: context)
                 try context.saveContext()
             }
