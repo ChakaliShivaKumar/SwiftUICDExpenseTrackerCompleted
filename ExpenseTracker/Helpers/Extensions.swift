@@ -20,3 +20,7 @@ extension Double {
     }
     
 }
+
+extension Notification.Name {
+    static let expenseDataChanged = Notification.Name("expenseDataChanged")
+}

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import Combine
 
 struct GroupsTabView: View {
     
@@ -32,10 +33,16 @@ struct GroupsTabView: View {
                 }
                 .onDelete(perform: deleteGroups)
             }
-            .navigationBarTitle("Groups", displayMode: .inline)
+            .navigationBarTitle("Groups")
             .navigationBarItems(trailing: Button(action: addTapped) { Text("Add") })
             .sheet(isPresented: $isAddFormPresented) {
                 GroupFormView(context: self.context)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .expenseDataChanged)) { _ in
+                // Refresh context when expenses change to update group totals
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    context.refreshAllObjects()
+                }
             }
         }
     }

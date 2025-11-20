@@ -326,9 +326,14 @@ struct LogFormView: View {
                 try context.saveContext()
             }
             
+            // Post notification to refresh dashboard after all saves complete
+            NotificationCenter.default.post(name: .expenseDataChanged, object: nil)
+            
             presentationMode.wrappedValue.dismiss()
         } catch let error as NSError {
             print("Error saving: \(error.localizedDescription)")
+            // Post notification even on error, in case partial saves occurred
+            NotificationCenter.default.post(name: .expenseDataChanged, object: nil)
         }
     }
 }

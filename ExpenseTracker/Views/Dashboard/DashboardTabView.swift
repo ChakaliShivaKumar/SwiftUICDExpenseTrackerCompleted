@@ -8,6 +8,7 @@
 
 import SwiftUI
 import CoreData
+import Combine
 
 struct DashboardTabView: View {
     
@@ -59,31 +60,45 @@ struct DashboardTabView: View {
         }
         .padding(.top)
         .onAppear(perform: fetchTotalSums)
+        .onReceive(NotificationCenter.default.publisher(for: .expenseDataChanged)) { _ in
+            // Add a small delay to ensure context has saved
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                fetchTotalSums()
+            }
+        }
     }
     
     func fetchTotalSums() {
+        // Refresh context to ensure we have latest data
+        context.refreshAllObjects()
+        
         // Get the current user (default "You" user or first user)
         let users = User.fetchAll(context: self.context)
         guard let currentUser = users.first(where: { $0.nameText == "You" }) ?? users.first else {
             // If no users exist, show empty state
-            self.totalExpenses = 0
-            self.categoriesSum = []
+            DispatchQueue.main.async {
+                self.totalExpenses = 0
+                self.categoriesSum = []
+            }
             return
         }
         
-        // Fetch only the user's split amounts
+        // Fetch only the user's split amounts across all expenses
         ExpenseLog.fetchUserSplitCategoriesTotalAmountSum(context: self.context, user: currentUser) { (results) in
-            guard !results.isEmpty else {
-                self.totalExpenses = 0
-                self.categoriesSum = []
-                return
+            // Ensure UI updates happen on main thread
+            DispatchQueue.main.async {
+                guard !results.isEmpty else {
+                    self.totalExpenses = 0
+                    self.categoriesSum = []
+                    return
+                }
+                
+                let totalSum = results.map { $0.sum }.reduce(0, +)
+                self.totalExpenses = totalSum
+                self.categoriesSum = results.map({ (result) -> CategorySum in
+                    return CategorySum(sum: result.sum, category: result.category)
+                })
             }
-            
-            let totalSum = results.map { $0.sum }.reduce(0, +)
-            self.totalExpenses = totalSum
-            self.categoriesSum = results.map({ (result) -> CategorySum in
-                return CategorySum(sum: result.sum, category: result.category)
-            })
         }
     }
 }

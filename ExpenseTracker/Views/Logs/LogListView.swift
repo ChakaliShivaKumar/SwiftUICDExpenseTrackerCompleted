@@ -9,6 +9,46 @@
 import SwiftUI
 import CoreData
 
+// Helper ViewModifier for swipe actions with iOS version compatibility
+struct SwipeActionsModifier: ViewModifier {
+    let onDelete: () -> Void
+    let onClearSplit: (() -> Void)?
+    
+    func body(content: Content) -> some View {
+        if #available(iOS 15.0, *) {
+            content
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive, action: onDelete) {
+                        if #available(iOS 14.0, *) {
+                            Label("Delete", systemImage: "trash")
+                        } else {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("Delete")
+                            }
+                        }
+                    }
+                    
+                    if let onClearSplit = onClearSplit {
+                        Button(action: onClearSplit) {
+                            if #available(iOS 14.0, *) {
+                                Label("Clear Split", systemImage: "arrow.uturn.backward")
+                            } else {
+                                HStack {
+                                    Image(systemName: "arrow.uturn.backward")
+                                    Text("Clear Split")
+                                }
+                            }
+                        }
+                        .tint(.orange)
+                    }
+                }
+        } else {
+            content
+        }
+    }
+}
+
 struct LogListView: View {
     
     @State var logToEdit: ExpenseLog?
@@ -52,6 +92,33 @@ struct LogListView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .contextMenu {
+                    // Delete expense option
+                    Button(action: {
+                        onDeleteExpense(log: log)
+                    }) {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Delete Expense")
+                        }
+                    }
+                    
+                    // Clear split option (only show if expense has participants)
+                    if !log.participantsArray.isEmpty {
+                        Button(action: {
+                            onClearSplit(log: log)
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.uturn.backward")
+                                Text("Clear Split")
+                            }
+                        }
+                    }
+                }
+                .modifier(SwipeActionsModifier(
+                    onDelete: { onDeleteExpense(log: log) },
+                    onClearSplit: log.participantsArray.isEmpty ? nil : { onClearSplit(log: log) }
+                ))
                 
             }
                
@@ -74,9 +141,25 @@ struct LogListView: View {
     private func onDelete(with indexSet: IndexSet) {
         indexSet.forEach { index in
             let log = result[index]
-            context.delete(log)
+            log.deleteExpense(context: context)
         }
         try? context.saveContext()
+        // Post notification to refresh dashboard
+        NotificationCenter.default.post(name: .expenseDataChanged, object: nil)
+    }
+    
+    private func onDeleteExpense(log: ExpenseLog) {
+        log.deleteExpense(context: context)
+        try? context.saveContext()
+        // Post notification to refresh dashboard
+        NotificationCenter.default.post(name: .expenseDataChanged, object: nil)
+    }
+    
+    private func onClearSplit(log: ExpenseLog) {
+        log.clearSplit(context: context)
+        try? context.saveContext()
+        // Post notification to refresh dashboard
+        NotificationCenter.default.post(name: .expenseDataChanged, object: nil)
     }
 }
 
@@ -88,3 +171,4 @@ struct LogListView_Previews: PreviewProvider {
             .environment(\.managedObjectContext, stack.viewContext)
     }
 }
+

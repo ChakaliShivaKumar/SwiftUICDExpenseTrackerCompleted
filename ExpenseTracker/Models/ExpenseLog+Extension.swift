@@ -108,10 +108,16 @@ extension ExpenseLog {
                     }
                     return (amount, category)
                 }.compactMap { $0 }
-                completion(data)
+                
+                // Ensure completion is called on main thread for UI updates
+                DispatchQueue.main.async {
+                    completion(data)
+                }
             } catch let error as NSError {
                 print((error.localizedDescription))
-                completion([])
+                DispatchQueue.main.async {
+                    completion([])
+                }
             }
         }
         
@@ -121,18 +127,29 @@ extension ExpenseLog {
     /// For group expenses: only counts the user's participant amount
     /// For non-group expenses: counts the full expense amount
     static func fetchUserSplitCategoriesTotalAmountSum(context: NSManagedObjectContext, user: User, completion: @escaping ([(sum: Double, category: Category)]) -> ()) {
+        // Get user's object ID to fetch it in the perform block's context
+        let userObjectID = user.objectID
+        
         let request: NSFetchRequest<ExpenseLog> = ExpenseLog.fetchRequest()
         request.returnsObjectsAsFaults = false
+        // Prefetch participants and user relationships to ensure they're loaded
+        request.relationshipKeyPathsForPrefetching = ["participants", "participants.user", "group"]
         
         context.perform {
             do {
+                // Get the user object in this context to avoid cross-context access
+                guard let userInContext = try? context.existingObject(with: userObjectID) as? User else {
+                    completion([])
+                    return
+                }
+                
                 let expenses = try request.execute()
                 
                 // Group by category and sum user's split amounts
                 var categorySums: [Category: Double] = [:]
                 
                 for expense in expenses {
-                    let userAmount = expense.userSplitAmount(for: user)
+                    let userAmount = expense.userSplitAmount(for: userInContext)
                     if userAmount > 0 {
                         let category = expense.categoryEnum
                         categorySums[category, default: 0] += userAmount
@@ -144,10 +161,15 @@ extension ExpenseLog {
                     return (sum, category)
                 }
                 
-                completion(results)
+                // Ensure completion is called on main thread for UI updates
+                DispatchQueue.main.async {
+                    completion(results)
+                }
             } catch let error as NSError {
                 print("Error fetching user split amounts: \(error.localizedDescription)")
-                completion([])
+                DispatchQueue.main.async {
+                    completion([])
+                }
             }
         }
     }
@@ -277,6 +299,42 @@ extension ExpenseLog {
         }
         
         self.participants = NSSet(array: newParticipants)
+    }
+    
+    /// Clears all splits from the expense
+    /// For group expenses: also reverses the associated debts
+    func clearSplit(context: NSManagedObjectContext) {
+        // Reverse debts if this is a group expense with participants
+        if isGroupExpense, let group = group, !participantsArray.isEmpty {
+            Debt.reverseDebts(from: self, context: context)
+        }
+        
+        // Remove all participants
+        if let existingParticipants = participants as? Set<ExpenseParticipant> {
+            for participant in existingParticipants {
+                context.delete(participant)
+            }
+        }
+        
+        self.participants = NSSet()
+    }
+    
+    /// Deletes the expense and all associated data (participants, debts)
+    func deleteExpense(context: NSManagedObjectContext) {
+        // Reverse debts if this is a group expense
+        if isGroupExpense, let group = group, !participantsArray.isEmpty {
+            Debt.reverseDebts(from: self, context: context)
+        }
+        
+        // Delete all participants (they will cascade delete, but we'll be explicit)
+        if let existingParticipants = participants as? Set<ExpenseParticipant> {
+            for participant in existingParticipants {
+                context.delete(participant)
+            }
+        }
+        
+        // Delete the expense itself
+        context.delete(self)
     }
     
 }

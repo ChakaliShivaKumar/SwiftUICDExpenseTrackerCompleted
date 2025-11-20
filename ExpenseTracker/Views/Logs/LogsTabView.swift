@@ -37,7 +37,7 @@ struct LogsTabView: View {
                 LogFormView(context: self.context)
             }
             .navigationBarItems(trailing: Button(action: addTapped) { Text("Add") })
-            .navigationBarTitle("Expense Logs", displayMode: .inline)
+            .navigationBarTitle("Expense Logs")
         }
     }
     
