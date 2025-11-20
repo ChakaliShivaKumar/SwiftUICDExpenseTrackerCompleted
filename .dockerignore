@@ -1,0 +1,30 @@
+# Xcode user-specific files
+*.xcuserstate
+*.xcuserdatad
+xcuserdata/
+
+# Build products
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# macOS files
+.DS_Store
+**/.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Images
+*.png
+*.jpg
+*.jpeg
+
+# License
+LICENSE
+

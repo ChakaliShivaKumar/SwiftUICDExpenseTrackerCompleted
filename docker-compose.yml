@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # SwiftLint service for code quality checks
+  swiftlint:
+    image: ghcr.io/realm/swiftlint:latest
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: swiftlint lint --path ExpenseTracker
+    profiles:
+      - lint
+
+  # Documentation generator service (using Jazzy if needed)
+  docs:
+    image: ruby:3.1
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: |
+      bash -c "
+        gem install jazzy --no-document || echo 'Jazzy installation skipped'
+        echo 'Documentation tools ready'
+      "
+    profiles:
+      - docs
+
+  # Code statistics and analysis
+  code-stats:
+    image: alpine:latest
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: |
+      sh -c "
+        echo '=== Code Statistics ===' &&
+        echo 'Swift files:' &&
+        find ExpenseTracker -name '*.swift' | wc -l &&
+        echo 'Total lines of code:' &&
+        find ExpenseTracker -name '*.swift' -exec wc -l {} + | tail -1 &&
+        echo 'Project structure:' &&
+        find ExpenseTracker -type f -name '*.swift' | head -20
+      "
+    profiles:
+      - stats
+
+  # Development helper - file watcher for changes
+  dev-helper:
+    image: node:18-alpine
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: |
+      sh -c "
+        echo 'Development helper container ready' &&
+        echo 'Available commands:' &&
+        echo '  - swiftlint: docker-compose run --rm swiftlint' &&
+        echo '  - stats: docker-compose run --rm code-stats' &&
+        echo 'Note: This app requires macOS with Xcode to build and run'
+      "
+
+volumes:
+  workspace:
+    driver: local
+
